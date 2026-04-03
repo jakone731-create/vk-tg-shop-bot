@@ -33,8 +33,7 @@ if (goodsCount.count === 0) {
   `);
 }
 
-const vk = new VK({ token: process.env.VK_TOKEN });
-
+const vk = new VK({ token:vk1.a.BkvYuWVpqxBtIiRh8cdbu-LlzE1OaA3XfTgQ1g-c_2SofxwJBU2Mdo8QlnjvWYuZCCyP_TDxZBG8CYw_ucrHQDzDIrQkBOmHG7g2TocTjpG9esTnHIuzC7BUTHGQkzHB6t4_1TQ9ujvHRb-qvi11S4fRBCG0OEW4jwjDpSFchRrgo5aaYDrcItNCd-nbvBdhOHlX2ZK0wzBhfYer0nHMDQ)};
 // Обработка сообщений
 vk.updates.on('message_new', async (ctx) => {
   const vkId = ctx.senderId;
