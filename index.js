@@ -1,174 +1,121 @@
-const express = require('express');
 const { VK } = require('vk-io');
-const Database = require('better-sqlite3');
 
-const app = express();
-app.use(express.json());
+// 👇 ТВОЙ ТОКЕН УЖЕ ВСТАВЛЕН 👇
+const VK_TOKEN = 'vk1.a.BkvYuWVpqxBtIiRh8cdbu-LlzE1OaA3XfTgQ1g-c_2SofxwJBU2Mdo8QlnjvWYuZCCyP_TDxZBG8CYw_ucrHQDzDIrQkBOmHG7g2TocTjpG9esTnHIuzC7BUTHGQkzHB6t4_1TQ9ujvHRb-qvi11S4fRBCG0OEW4jwjDpSFchRrgo5aaYDrcItNCd-nbvBdhOHlX2ZK0wzBhfYer0nHMDQ';
 
-// Подключение БД
-const db = new Database('shop.db');
-db.exec(`
-  CREATE TABLE IF NOT EXISTS goods (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT, price INTEGER, description TEXT
-  );
-  CREATE TABLE IF NOT EXISTS accounts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    good_id INTEGER, login TEXT, password TEXT, is_sold INTEGER DEFAULT 0
-  );
-  CREATE TABLE IF NOT EXISTS users (
-    vk_id INTEGER PRIMARY KEY,
-    cart TEXT DEFAULT '[]',
-    purchases TEXT DEFAULT '[]'
-  );
-`);
+const vk = new VK({ token: VK_TOKEN });
 
-// Добавляем товары если их нет
-const goodsCount = db.prepare('SELECT COUNT(*) as count FROM goods').get();
-if (goodsCount.count === 0) {
-  db.exec(`
-    INSERT INTO goods (name, price, description) VALUES 
-    ('TG Premium 1 мес', 299, 'Premium на 30 дней'),
-    ('TG Аккаунт +50 подписчиков', 199, '50 реальных подписчиков');
-  `);
-}
+// Каталог товаров
+const goods = [
+  { id: 1, name: 'TG Premium 1 месяц', price: 299 },
+  { id: 2, name: 'TG Аккаунт +50 подписчиков', price: 199 },
+  { id: 3, name: 'TG Старый аккаунт 2020', price: 499 }
+];
 
-const vk = new VK({ token:vk1.a.BkvYuWVpqxBtIiRh8cdbu-LlzE1OaA3XfTgQ1g-c_2SofxwJBU2Mdo8QlnjvWYuZCCyP_TDxZBG8CYw_ucrHQDzDIrQkBOmHG7g2TocTjpG9esTnHIuzC7BUTHGQkzHB6t4_1TQ9ujvHRb-qvi11S4fRBCG0OEW4jwjDpSFchRrgo5aaYDrcItNCd-nbvBdhOHlX2ZK0wzBhfYer0nHMDQ)};
-// Обработка сообщений
+// Аккаунты (логин:пароль) — ЗАМЕНИ НА СВОИ
+const accounts = {
+  1: ['prem_user1:pass111', 'prem_user2:pass222'],
+  2: ['fol50_1:folpass1', 'fol50_2:folpass2'],
+  3: ['old2020_1:old123', 'old2020_2:old456']
+};
+
+let soldCount = { 1: 0, 2: 0, 3: 0 };
+let users = new Map();
+
 vk.updates.on('message_new', async (ctx) => {
-  const vkId = ctx.senderId;
-  if (!vkId) return;
-  
-  // Регистрация пользователя
-  db.prepare('INSERT OR IGNORE INTO users (vk_id) VALUES (?)').run(vkId);
-  
+  const userId = ctx.senderId;
   const text = ctx.text?.toLowerCase() || '';
   
+  if (!users.has(userId)) {
+    users.set(userId, { cart: [], purchases: [] });
+  }
+  const user = users.get(userId);
+  
+  // Старт
+  if (text === 'start' || text === 'привет') {
+    await ctx.send('🤖 Бот для продажи Telegram аккаунтов\n\nКоманды:\nкаталог\nкорзина\nоплатить\nпокупки');
+    return;
+  }
+  
   // Каталог
-  if (text === 'start' || text === 'привет' || text === 'каталог') {
-    const goods = db.prepare('SELECT * FROM goods').all();
-    let message = '📋 Наш каталог:\n\n';
+  if (text === 'каталог') {
+    let msg = '📋 Товары:\n\n';
     goods.forEach(g => {
-      message += `${g.id}. ${g.name} — ${g.price}₽\n   ${g.description}\n\n`;
+      msg += `${g.id}. ${g.name} — ${g.price}₽\n`;
     });
-    message += 'Напишите номер товара, чтобы добавить в корзину';
-    await ctx.send(message);
+    msg += '\nНапиши номер товара (1,2,3) чтобы добавить в корзину';
+    await ctx.send(msg);
+    return;
   }
   
-  // Добавление в корзину (по номеру)
-  else if (/^\d+$/.test(text)) {
-    const goodId = parseInt(text);
-    const good = db.prepare('SELECT * FROM goods WHERE id = ?').get(goodId);
-    
-    if (good) {
-      const user = db.prepare('SELECT cart FROM users WHERE vk_id = ?').get(vkId);
-      const cart = JSON.parse(user.cart);
-      cart.push(good);
-      db.prepare('UPDATE users SET cart = ? WHERE vk_id = ?').run(JSON.stringify(cart), vkId);
-      await ctx.send(`✅ ${good.name} добавлен в корзину!\n\nНапишите "корзина" для оформления`);
-    } else {
-      await ctx.send('❌ Товар не найден. Напишите "каталог" для просмотра');
-    }
+  // Добавление в корзину
+  if (text === '1' || text === '2' || text === '3') {
+    const good = goods.find(g => g.id === parseInt(text));
+    user.cart.push(good);
+    users.set(userId, user);
+    await ctx.send(`✅ ${good.name} добавлен в корзину`);
+    return;
   }
   
-  // Просмотр корзины
-  else if (text === 'корзина') {
-    const user = db.prepare('SELECT cart FROM users WHERE vk_id = ?').get(vkId);
-    const cart = JSON.parse(user.cart);
-    
-    if (cart.length === 0) {
-      await ctx.send('🛒 Корзина пуста. Напишите "каталог" для покупок');
+  // Корзина
+  if (text === 'корзина') {
+    if (user.cart.length === 0) {
+      await ctx.send('Корзина пуста');
       return;
     }
-    
-    let message = '📦 Ваша корзина:\n';
+    let msg = '🛒 Корзина:\n';
     let total = 0;
-    cart.forEach((g, i) => {
-      message += `${i+1}. ${g.name} — ${g.price}₽\n`;
+    user.cart.forEach((g, i) => {
+      msg += `${i+1}. ${g.name} — ${g.price}₽\n`;
       total += g.price;
     });
-    message += `\n💰 Итого: ${total}₽\n\nНапишите "оплатить" для оформления`;
-    await ctx.send(message);
+    msg += `\nИтого: ${total}₽\nНапиши "оплатить"`;
+    await ctx.send(msg);
+    return;
   }
   
-  // Оформление заказа
-  else if (text === 'оплатить') {
-    const user = db.prepare('SELECT cart FROM users WHERE vk_id = ?').get(vkId);
-    const cart = JSON.parse(user.cart);
-    
-    if (cart.length === 0) {
+  // Оплата
+  if (text === 'оплатить') {
+    if (user.cart.length === 0) {
       await ctx.send('Корзина пуста');
       return;
     }
     
-    let result = '🎉 Ваши покупки:\n\n';
-    let allSuccess = true;
-    
-    for (const good of cart) {
-      const account = db.prepare(`
-        SELECT * FROM accounts WHERE good_id = ? AND is_sold = 0 LIMIT 1
-      `).get(good.id);
+    let result = '🎉 Твои покупки:\n\n';
+    for (const good of user.cart) {
+      const accs = accounts[good.id];
+      const idx = soldCount[good.id];
       
-      if (account) {
-        db.prepare('UPDATE accounts SET is_sold = 1 WHERE id = ?').run(account.id);
-        
-        // Сохраняем покупку
-        const userPurchases = db.prepare('SELECT purchases FROM users WHERE vk_id = ?').get(vkId);
-        const purchases = JSON.parse(userPurchases.purchases);
-        purchases.push({
-          good_id: good.id,
-          name: good.name,
-          login: account.login,
-          password: account.password,
-          date: Date.now()
-        });
-        db.prepare('UPDATE users SET purchases = ? WHERE vk_id = ?').run(JSON.stringify(purchases), vkId);
-        
-        result += `✅ ${good.name}\n   🔑 ${account.login}:${account.password}\n\n`;
+      if (idx < accs.length) {
+        const [login, pass] = accs[idx].split(':');
+        soldCount[good.id]++;
+        user.purchases.push({ name: good.name, login, pass, date: Date.now() });
+        result += `✅ ${good.name}\n🔑 ${login}:${pass}\n\n`;
       } else {
-        result += `❌ ${good.name} — временно нет\n\n`;
-        allSuccess = false;
+        result += `❌ ${good.name} — закончился\n\n`;
       }
     }
-    
-    // Очищаем корзину
-    db.prepare('UPDATE users SET cart = ? WHERE vk_id = ?').run('[]', vkId);
+    user.cart = [];
+    users.set(userId, user);
     await ctx.send(result);
+    return;
   }
   
   // История покупок
-  else if (text === 'покупки' || text === 'мои покупки') {
-    const user = db.prepare('SELECT purchases FROM users WHERE vk_id = ?').get(vkId);
-    const purchases = JSON.parse(user.purchases);
-    
-    if (purchases.length === 0) {
-      await ctx.send('У вас пока нет покупок');
+  if (text === 'покупки') {
+    if (user.purchases.length === 0) {
+      await ctx.send('Нет покупок');
       return;
     }
-    
-    let message = '📜 История покупок:\n\n';
-    purchases.forEach((p, i) => {
-      message += `${i+1}. ${p.name}\n   🔑 ${p.login}:${p.password}\n   📅 ${new Date(p.date).toLocaleDateString()}\n\n`;
+    let msg = '📜 История:\n\n';
+    user.purchases.forEach((p, i) => {
+      msg += `${i+1}. ${p.name}\n🔑 ${p.login}:${p.pass}\n\n`;
     });
-    await ctx.send(message);
+    await ctx.send(msg);
+    return;
   }
   
-  // Команда по умолчанию
-  else {
-    await ctx.send(
-      '🤖 Команды:\n' +
-      '• каталог — список товаров\n' +
-      '• корзина — посмотреть выбранное\n' +
-      '• оплатить — купить всё из корзины\n' +
-      '• покупки — получить логины и пароли'
-    );
-  }
+  await ctx.send('❓ Не понял. Напиши "каталог"');
 });
 
-// Запуск через Long Poll API (не требует вебхуков)
-vk.updates.start().then(() => {
-  console.log('✅ Бот запущен');
-});
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server on port ${PORT}`));
+vk.updates.start().then(() => console.log('✅ Бот запущен'));
